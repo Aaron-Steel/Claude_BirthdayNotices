@@ -76,9 +76,7 @@ def send_outlook_email(subject, body, recipients):
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
 
-        with smtplib.SMTP("smtp.office365.com", 587) as server:
-            server.ehlo()
-            server.starttls()
+        with smtplib.SMTP_SSL("smtp.office365.com", 465) as server:
             server.login(smtp_user, smtp_password)
             server.sendmail(smtp_user, recipients, msg.as_string())
 
