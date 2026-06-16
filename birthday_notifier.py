@@ -5,13 +5,13 @@ when today matches a birthday or work anniversary.
 """
 
 import csv
+import json
 import os
 import sys
+import urllib.parse
+import urllib.request
 from datetime import datetime, date
 from pathlib import Path
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-import smtplib
 
 # --- CONFIG ---
 CSV_FILE = Path(__file__).parent / "start dates and birthdays.csv"
@@ -61,24 +61,48 @@ def parse_birthday(date_str):
 
 
 def send_outlook_email(subject, body, recipients):
-    """Send email via Office 365 SMTP."""
+    """Send email via Microsoft Graph API (port 443)."""
+    tenant_id = os.environ.get("TENANT_ID")
+    client_id = os.environ.get("CLIENT_ID")
     smtp_user = os.environ.get("SMTP_USER")
     smtp_password = os.environ.get("SMTP_PASSWORD")
 
-    if not smtp_user or not smtp_password:
-        print("ERROR: SMTP_USER and SMTP_PASSWORD environment variables must be set")
+    if not all([tenant_id, client_id, smtp_user, smtp_password]):
+        print("ERROR: TENANT_ID, CLIENT_ID, SMTP_USER, SMTP_PASSWORD must all be set")
         return False
 
     try:
-        msg = MIMEMultipart()
-        msg["From"] = smtp_user
-        msg["To"] = "; ".join(recipients)
-        msg["Subject"] = subject
-        msg.attach(MIMEText(body, "plain"))
+        # Get OAuth2 access token (ROPC flow)
+        token_data = urllib.parse.urlencode({
+            "grant_type": "password",
+            "client_id": client_id,
+            "username": smtp_user,
+            "password": smtp_password,
+            "scope": "https://graph.microsoft.com/Mail.Send",
+        }).encode()
+        token_req = urllib.request.Request(
+            f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+            data=token_data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urllib.request.urlopen(token_req) as resp:
+            token = json.loads(resp.read())["access_token"]
 
-        with smtplib.SMTP_SSL("smtp.office365.com", 465) as server:
-            server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_user, recipients, msg.as_string())
+        # Send via Graph API
+        payload = json.dumps({
+            "message": {
+                "subject": subject,
+                "body": {"contentType": "Text", "content": body},
+                "toRecipients": [{"emailAddress": {"address": r}} for r in recipients],
+            }
+        }).encode()
+        send_req = urllib.request.Request(
+            "https://graph.microsoft.com/v1.0/me/sendMail",
+            data=payload,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(send_req):
+            pass  # 202 Accepted = success
 
         print(f"Email sent: {subject}")
         return True
