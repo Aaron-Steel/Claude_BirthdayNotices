@@ -61,24 +61,23 @@ def parse_birthday(date_str):
 
 
 def send_outlook_email(subject, body, recipients):
-    """Send email via Microsoft Graph API (port 443)."""
+    """Send email via Microsoft Graph API (client credentials flow)."""
     tenant_id = os.environ.get("TENANT_ID")
     client_id = os.environ.get("CLIENT_ID")
-    smtp_user = os.environ.get("SMTP_USER")
-    smtp_password = os.environ.get("SMTP_PASSWORD")
+    client_secret = os.environ.get("CLIENT_SECRET")
+    sender_email = os.environ.get("SENDER_EMAIL")
 
-    if not all([tenant_id, client_id, smtp_user, smtp_password]):
-        print("ERROR: TENANT_ID, CLIENT_ID, SMTP_USER, SMTP_PASSWORD must all be set")
+    if not all([tenant_id, client_id, client_secret, sender_email]):
+        print("ERROR: TENANT_ID, CLIENT_ID, CLIENT_SECRET, SENDER_EMAIL must all be set")
         return False
 
     try:
-        # Get OAuth2 access token (ROPC flow)
+        # Get access token (client credentials flow — no user login required)
         token_data = urllib.parse.urlencode({
-            "grant_type": "password",
+            "grant_type": "client_credentials",
             "client_id": client_id,
-            "username": smtp_user,
-            "password": smtp_password,
-            "scope": "https://graph.microsoft.com/Mail.Send",
+            "client_secret": client_secret,
+            "scope": "https://graph.microsoft.com/.default",
         }).encode()
         token_req = urllib.request.Request(
             f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
@@ -88,7 +87,7 @@ def send_outlook_email(subject, body, recipients):
         with urllib.request.urlopen(token_req) as resp:
             token = json.loads(resp.read())["access_token"]
 
-        # Send via Graph API
+        # Send via Graph API using the sender's mailbox
         payload = json.dumps({
             "message": {
                 "subject": subject,
@@ -97,7 +96,7 @@ def send_outlook_email(subject, body, recipients):
             }
         }).encode()
         send_req = urllib.request.Request(
-            "https://graph.microsoft.com/v1.0/me/sendMail",
+            f"https://graph.microsoft.com/v1.0/users/{sender_email}/sendMail",
             data=payload,
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         )
