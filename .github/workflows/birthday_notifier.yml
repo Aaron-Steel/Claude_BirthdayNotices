@@ -1,0 +1,26 @@
+name: Birthday & Anniversary Notifier
+
+on:
+  schedule:
+    - cron: '0 21 * * *'  # 7:00 AM AEST (UTC+10)
+  workflow_dispatch:       # Allows manual trigger from GitHub UI for testing
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run birthday notifier
+        env:
+          TENANT_ID: ${{ secrets.TENANT_ID }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+        run: python birthday_notifier.py
