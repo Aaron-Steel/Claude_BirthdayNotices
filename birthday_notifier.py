@@ -13,6 +13,8 @@ import urllib.request
 from datetime import datetime, date
 from pathlib import Path
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # --- CONFIG ---
 CSV_FILE = Path(__file__).parent / "start dates and birthdays.csv"
 RECIPIENTS_FILE = Path(__file__).parent / "recipients.csv"
