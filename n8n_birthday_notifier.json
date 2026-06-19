@@ -1,0 +1,189 @@
+{
+  "name": "Birthday & Anniversary Notifier",
+  "settings": {
+    "timezone": "Australia/Brisbane",
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "node-schedule",
+      "name": "Daily 7am AEST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/Aaron-Steel/Claude_BirthdayNotices/contents/start%20dates%20and%20birthdays.csv?ref=main",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.raw"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "node-emp",
+      "name": "Get Employees CSV",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GitHub CSV Read Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/Aaron-Steel/Claude_BirthdayNotices/contents/recipients.csv?ref=main",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.raw"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "node-rec",
+      "name": "Get Recipients CSV",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GitHub CSV Read Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== Birthday & Work Anniversary — find today's matches =====\n// Reads the two CSVs fetched by the upstream HTTP nodes, figures out who has a\n// birthday / work anniversary TODAY (in AEST), and emits one item per email.\n\nconst TIMEZONE = 'Australia/Brisbane'; // UTC+10 year-round, matches 7am AEST\n\nconst MONTHS = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};\nconst MONTH_NAMES = ['January','February','March','April','May','June','July',\n                     'August','September','October','November','December'];\n\nfunction ordinal(n) {\n  if (n % 100 >= 11 && n % 100 <= 13) return n + 'th';\n  return n + ({1:'st', 2:'nd', 3:'rd'}[n % 10] || 'th');\n}\n\n// Simple CSV parser (no quoted commas in this data)\nfunction parseCsv(text) {\n  const lines = String(text).replace(/\\r\\n/g, '\\n').split('\\n').filter(l => l.trim() !== '');\n  if (!lines.length) return [];\n  const headers = lines[0].split(',').map(h => h.trim());\n  return lines.slice(1).map(line => {\n    const cells = line.split(',');\n    const row = {};\n    headers.forEach((h, i) => { row[h] = (cells[i] || '').trim(); });\n    return row;\n  });\n}\n\n// \"Today\" in the target timezone (en-CA gives YYYY-MM-DD parts)\nconst parts = new Intl.DateTimeFormat('en-CA', {\n  timeZone: TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit'\n}).formatToParts(new Date());\nconst today = {\n  year:  Number(parts.find(p => p.type === 'year').value),\n  month: Number(parts.find(p => p.type === 'month').value),\n  day:   Number(parts.find(p => p.type === 'day').value),\n};\n\n// Pull the raw CSV text from the upstream HTTP Request nodes\nconst employees  = parseCsv($('Get Employees CSV').first().json.data);\nconst recipients = parseCsv($('Get Recipients CSV').first().json.data)\n  .map(r => r.Email)\n  .filter(Boolean)\n  .join(',');\n\nconst out = [];\n\nfor (const row of employees) {\n  const name = (row.Name || '').trim();\n  if (!name) continue;\n\n  const country    = (row.Country || '').trim();\n  const department = (row.Department || '').trim();\n  const detailLines = [];\n  if (country)    detailLines.push('Location: ' + country);\n  if (department) detailLines.push('Department: ' + department);\n  const details = detailLines.join('\\n');\n\n  // --- Birthday: \"DD-Mon\" (the header has a trailing space in the CSV) ---\n  const bday = (row['Birthday '] || row.Birthday || '').trim();\n  if (bday) {\n    const bits = bday.split('-');\n    const bDay = Number(bits[0]);\n    const bMonth = MONTHS[(bits[1] || '').toLowerCase()];\n    if (bMonth && bDay === today.day && bMonth === today.month) {\n      let body = 'Hi,\\n\\nToday is ' + name + \"'s birthday!\\n\\n\";\n      body += 'Birthday: ' + String(bDay).padStart(2, '0') + ' ' + MONTH_NAMES[bMonth - 1] + '\\n';\n      if (details) body += details + '\\n';\n      body += \"\\nDon't forget to wish them a happy birthday!\\n\\n-- Birthday Notifier\";\n      out.push({ json: { subject: '\\u{1F382} Birthday Today: ' + name, body, to: recipients } });\n    }\n  }\n\n  // --- Work anniversary: Start Date \"DD/MM/YYYY\" ---\n  const start = (row['Start Date'] || '').trim();\n  if (start) {\n    const bits = start.split('/');\n    const sDay = Number(bits[0]), sMonth = Number(bits[1]), sYear = Number(bits[2]);\n    if (sDay && sMonth && sYear && sDay === today.day && sMonth === today.month) {\n      const years = today.year - sYear;\n      if (years > 0) {\n        let body = 'Hi,\\n\\nToday marks ' + name + \"'s \" + ordinal(years) + ' work anniversary!\\n\\n';\n        body += 'Start date: ' + String(sDay).padStart(2, '0') + ' ' + MONTH_NAMES[sMonth - 1] + ' ' + sYear + '\\n';\n        body += 'Years with the company: ' + years + '\\n';\n        if (details) body += details + '\\n';\n        body += '\\nTake a moment to recognise their dedication!\\n\\n-- Birthday Notifier';\n        out.push({ json: { subject: '\\u{1F389} Work Anniversary Today: ' + name + ' — ' + ordinal(years) + ' Year!', body, to: recipients } });\n      }\n    }\n  }\n}\n\nreturn out;\n"
+      },
+      "id": "node-code",
+      "name": "Find today's birthdays & anniversaries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "={{ $json.body }}",
+        "toRecipients": "={{ $json.to }}",
+        "additionalFields": {
+          "bodyContentType": "text"
+        }
+      },
+      "id": "node-send",
+      "name": "Send Outlook email",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        300
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Microsoft Outlook (feeds@)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 7am AEST": {
+      "main": [
+        [
+          {
+            "node": "Get Employees CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Employees CSV": {
+      "main": [
+        [
+          {
+            "node": "Get Recipients CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Recipients CSV": {
+      "main": [
+        [
+          {
+            "node": "Find today's birthdays & anniversaries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find today's birthdays & anniversaries": {
+      "main": [
+        [
+          {
+            "node": "Send Outlook email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
