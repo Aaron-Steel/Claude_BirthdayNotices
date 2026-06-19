@@ -1,9 +1,11 @@
 name: Birthday & Anniversary Notifier
 
 on:
-  schedule:
-    - cron: '0 21 * * *'  # 7:00 AM AEST (UTC+10)
-  workflow_dispatch:       # Allows manual trigger from GitHub UI for testing
+  # Daily schedule DISABLED 2026-06-19 — this notifier now runs in n8n.
+  # Re-enable by uncommenting the two lines below if you ever revert off n8n.
+  # schedule:
+  #   - cron: '0 21 * * *'  # 7:00 AM AEST (UTC+10)
+  workflow_dispatch:       # Manual trigger kept as a fallback
 
 jobs:
   notify:
